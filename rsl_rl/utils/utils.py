@@ -198,7 +198,7 @@ def string_to_callable(name: str) -> Callable:
         )
         raise ValueError(msg)
 
-
+# 根据环境给出的obs和配置obs_groups，指定哪些观测送入policy或critic，验证补全返回一个合法的观测配置表
 def resolve_obs_groups(
     obs: TensorDict, obs_groups: dict[str, list[str]], default_sets: list[str]
 ) -> dict[str, list[str]]:

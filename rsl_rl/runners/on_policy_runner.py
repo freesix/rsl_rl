@@ -30,28 +30,28 @@ class OnPolicyRunner:
         self.env = env
 
         # check if multi-gpu is enabled
-        self._configure_multi_gpu()
+        self._configure_multi_gpu() # 配置多GPU
 
         # store training configuration
-        self.num_steps_per_env = self.cfg["num_steps_per_env"]
-        self.save_interval = self.cfg["save_interval"]
+        self.num_steps_per_env = self.cfg["num_steps_per_env"] 
+        self.save_interval = self.cfg["save_interval"]  # 保存训练模型间隔
 
         # query observations from environment for algorithm construction
-        obs = self.env.get_observations()
+        obs = self.env.get_observations()   # 获取观测，和isaacsim 5.0中有差异（2025.10.10）
         default_sets = ["critic"]
-        if "rnd_cfg" in self.alg_cfg and self.alg_cfg["rnd_cfg"] is not None:
+        if "rnd_cfg" in self.alg_cfg and self.alg_cfg["rnd_cfg"] is not None:   # 是否有好奇心探索模块（随机网络蒸馏rnd）
             default_sets.append("rnd_state")
-        self.cfg["obs_groups"] = resolve_obs_groups(obs, self.cfg["obs_groups"], default_sets)
+        self.cfg["obs_groups"] = resolve_obs_groups(obs, self.cfg["obs_groups"], default_sets)  # 检查obs配置，并给不同网络分配不同的obs
 
         # create the algorithm
         self.alg = self._construct_algorithm(obs)
 
         # Decide whether to disable logging
         # We only log from the process with rank 0 (main process)
-        self.disable_logs = self.is_distributed and self.gpu_global_rank != 0
+        self.disable_logs = self.is_distributed and self.gpu_global_rank != 0 # 是否关闭log并在多GPU时候仅在rank0输出log
 
         # Logging
-        self.log_dir = log_dir
+        self.log_dir = log_dir  # log目录
         self.writer = None
         self.tot_timesteps = 0
         self.tot_time = 0
@@ -60,17 +60,17 @@ class OnPolicyRunner:
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False):  # noqa: C901
         # initialize writer
-        self._prepare_logging_writer()
+        self._prepare_logging_writer()  # 根据参数选择对应的日志记录工具
 
         # randomize initial episode lengths (for exploration)
-        if init_at_random_ep_len:
+        if init_at_random_ep_len: # 为了增强探索，让不同环境从不同的初始步数开始
             self.env.episode_length_buf = torch.randint_like(
                 self.env.episode_length_buf, high=int(self.env.max_episode_length)
             )
 
         # start learning
-        obs = self.env.get_observations().to(self.device)
-        self.train_mode()  # switch to train mode (for dropout for example)
+        obs = self.env.get_observations().to(self.device) # 从环境中获取原始观测
+        self.train_mode()  # switch to train mode (for dropout for example) 将模型切换到训练模式
 
         # Book keeping
         ep_infos = []
@@ -86,22 +86,22 @@ class OnPolicyRunner:
             cur_ereward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
             cur_ireward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
-        # Ensure all parameters are in-synced
+        # Ensure all parameters are in-synced 多个gpu之间的参数同步
         if self.is_distributed:
             print(f"Synchronizing parameters for rank {self.gpu_global_rank}...")
             self.alg.broadcast_parameters()
 
         # Start training
-        start_iter = self.current_learning_iteration
+        start_iter = self.current_learning_iteration  # 当前训练轮次
         tot_iter = start_iter + num_learning_iterations
         for it in range(start_iter, tot_iter):
             start = time.time()
             # Rollout
-            with torch.inference_mode():
+            with torch.inference_mode(): # 关闭梯度计算，获取episode并存入经验池
                 for _ in range(self.num_steps_per_env):
-                    # Sample actions
+                    # Sample actions 根据观测输出动作
                     actions = self.alg.act(obs)
-                    # Step the environment
+                    # Step the environment 根据采取的动作获取环境反馈（观测、奖励、终止、其它）
                     obs, rewards, dones, extras = self.env.step(actions.to(self.env.device))
                     # Move to device
                     obs, rewards, dones = (obs.to(self.device), rewards.to(self.device), dones.to(self.device))
@@ -328,7 +328,7 @@ class OnPolicyRunner:
         if device is not None:
             self.alg.policy.to(device)
         return self.alg.policy.act_inference
-
+    # 根据参数有选择的将网络切换到训练模式
     def train_mode(self):
         # -- PPO
         self.alg.policy.train()
@@ -396,13 +396,14 @@ class OnPolicyRunner:
 
     def _construct_algorithm(self, obs) -> PPO:
         """Construct the actor-critic algorithm."""
-        # resolve RND config
+        # resolve RND config 解析RND配置
         self.alg_cfg = resolve_rnd_config(self.alg_cfg, obs, self.cfg["obs_groups"], self.env)
 
-        # resolve symmetry config
+        # resolve symmetry config 解析symmetry配置
         self.alg_cfg = resolve_symmetry_config(self.alg_cfg, self.env)
 
         # resolve deprecated normalization config
+        # 旧配置方法参数赋值给新配置方法，并给出警告让迁移使用新的配置方法
         if self.cfg.get("empirical_normalization") is not None:
             warnings.warn(
                 "The `empirical_normalization` parameter is deprecated. Please set `actor_obs_normalization` and "
@@ -415,16 +416,16 @@ class OnPolicyRunner:
                 self.policy_cfg["critic_obs_normalization"] = self.cfg["empirical_normalization"]
 
         # initialize the actor-critic
-        actor_critic_class = eval(self.policy_cfg.pop("class_name"))
+        actor_critic_class = eval(self.policy_cfg.pop("class_name")) # 从配置中取出网络类型并转化为类对象
         actor_critic: ActorCritic | ActorCriticRecurrent = actor_critic_class(
             obs, self.cfg["obs_groups"], self.env.num_actions, **self.policy_cfg
-        ).to(self.device)
+        ).to(self.device)   # 根据观测，观测组，动作维度等参数初始化这个类
 
         # initialize the algorithm
-        alg_class = eval(self.alg_cfg.pop("class_name"))
-        alg: PPO = alg_class(actor_critic, device=self.device, **self.alg_cfg, multi_gpu_cfg=self.multi_gpu_cfg)
+        alg_class = eval(self.alg_cfg.pop("class_name")) # 算法类
+        alg: PPO = alg_class(actor_critic, device=self.device, **self.alg_cfg, multi_gpu_cfg=self.multi_gpu_cfg) # 初始化算法对象
 
-        # initialize the storage
+        # initialize the storage 初始化经验池
         alg.init_storage(
             "rl",
             self.env.num_envs,

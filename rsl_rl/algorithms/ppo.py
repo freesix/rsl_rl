@@ -140,7 +140,7 @@ class PPO:
         return self.transition.actions
 
     def process_env_step(self, obs, rewards, dones, extras):
-        # update the normalizers
+        # update the normalizers 更新网络输入归一化的参数(mean、var)，根据obs递增更新归一化参数
         self.policy.update_normalization(obs)
         if self.rnd:
             self.rnd.update_normalization(obs)
@@ -158,6 +158,8 @@ class PPO:
             self.transition.rewards += self.intrinsic_rewards
 
         # Bootstrapping on time outs
+        # 在timeout状态下不视为失败终止贸然终止奖励，而是通过值函数来引导未来奖励。算法会错误地认为未来价值为0
+        # 导致长时间任务学习不稳定，Q值或V值在边界处被低估，特别在稀疏奖励任务中，影响严重。
         if "time_outs" in extras:
             self.transition.rewards += self.gamma * torch.squeeze(
                 self.transition.values * extras["time_outs"].unsqueeze(1).to(self.device), 1
