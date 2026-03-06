@@ -37,7 +37,7 @@ class OnPolicyRunner:
         self.save_interval = self.cfg["save_interval"]  # 保存训练模型间隔
 
         # query observations from environment for algorithm construction
-        obs = self.env.get_observations()   # 获取观测，和isaacsim 5.0中有差异（2025.10.10）
+        obs = self.env.get_observations()   # 获取观测，和isaacsim 5.0中的rsl-rl有差异（2025.10.10）
         default_sets = ["critic"]
         if "rnd_cfg" in self.alg_cfg and self.alg_cfg["rnd_cfg"] is not None:   # 是否有好奇心探索模块（随机网络蒸馏rnd）
             default_sets.append("rnd_state")
@@ -143,10 +143,10 @@ class OnPolicyRunner:
                 start = stop
 
                 # compute returns
-                self.alg.compute_returns(obs)
+                self.alg.compute_returns(obs)  # 计算回报和优势函数
 
             # update policy
-            loss_dict = self.alg.update()
+            loss_dict = self.alg.update() # 策略更新
 
             stop = time.time()
             learn_time = stop - start

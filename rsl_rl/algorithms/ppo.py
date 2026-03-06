@@ -153,9 +153,9 @@ class PPO:
         # Compute the intrinsic rewards and add to extrinsic rewards
         if self.rnd:
             # Compute the intrinsic rewards
-            self.intrinsic_rewards = self.rnd.get_intrinsic_reward(obs)
+            self.intrinsic_rewards = self.rnd.get_intrinsic_reward(obs) # 计算rnd的内部奖励
             # Add intrinsic rewards to extrinsic rewards
-            self.transition.rewards += self.intrinsic_rewards
+            self.transition.rewards += self.intrinsic_rewards # 将内部探索奖励加入总的奖励
 
         # Bootstrapping on time outs
         # 在timeout状态下不视为失败终止贸然终止奖励，而是通过值函数来引导未来奖励。算法会错误地认为未来价值为0
@@ -178,9 +178,9 @@ class PPO:
         )
 
     def update(self):  # noqa: C901
-        mean_value_loss = 0
-        mean_surrogate_loss = 0
-        mean_entropy = 0
+        mean_value_loss = 0     # 平均的均方差损失
+        mean_surrogate_loss = 0 # 平均的策略梯度损失（PPO算法改进过的，加入截断或KL散度，且优势函数也改进后的策略梯度损失
+        mean_entropy = 0        # 当前策略参数的熵值
         # -- RND loss
         if self.rnd:
             mean_rnd_loss = 0
@@ -193,9 +193,9 @@ class PPO:
             mean_symmetry_loss = None
 
         # generator for mini batches
-        if self.policy.is_recurrent:
+        if self.policy.is_recurrent:  # 如果策略网络是由循环神经网络构成，分割batch时候需要保证时序性
             generator = self.storage.recurrent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-        else:
+        else:   # 而其它网络架构分割batch时候不需要保证mini_batch内数据的时序性
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
 
         # iterate over batches
@@ -220,15 +220,16 @@ class PPO:
             original_batch_size = obs_batch.batch_size[0]
 
             # check if we should normalize advantages per mini batch
+            # 在每个minibatch对优势归一化，避免每个不同minibatch之间优势值的尺度差异，不利于稳定训练
             if self.normalize_advantage_per_mini_batch:
-                with torch.no_grad():
+                with torch.no_grad():   # 这个计算步骤不被纳入torch的计算图，即不参与梯度传播过程
                     advantages_batch = (advantages_batch - advantages_batch.mean()) / (advantages_batch.std() + 1e-8)
 
             # Perform symmetric augmentation
-            if self.symmetry and self.symmetry["use_data_augmentation"]:
+            if self.symmetry and self.symmetry["use_data_augmentation"]: # 使用对称性数据增强
                 # augmentation using symmetry
-                data_augmentation_func = self.symmetry["data_augmentation_func"]
-                # returned shape: [batch_size * num_aug, ...]
+                data_augmentation_func = self.symmetry["data_augmentation_func"]  # 数据增强函数（需自己实现、且在配置参数中写入对应函数名）
+                # returned shape: [batch_size * num_aug, ...]  # 返回扩增后的obs_batch, actions_batch，维度会因此发生改变
                 obs_batch, actions_batch = data_augmentation_func(
                     obs=obs_batch,
                     actions=actions_batch,
@@ -247,6 +248,7 @@ class PPO:
 
             # Recompute actions log prob and entropy for current batch of transitions
             # Note: we need to do this because we updated the policy with the new parameters
+            # 重新计算log-prob、alue、entropy，因为minibatch对策略更新后，策略都会发生改变，而我们需要的是当前策略的log-prob等
             # -- actor
             self.policy.act(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
             actions_log_prob_batch = self.policy.get_actions_log_prob(actions_batch)
@@ -254,13 +256,15 @@ class PPO:
             value_batch = self.policy.evaluate(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
             # -- entropy
             # we only keep the entropy of the first augmentation (the original one)
+            # 这里的mu、sigma、entropy保留原始数据的，不包含增强数据的，因为增强数据只用于增强训练，而不参与相关的统计
             mu_batch = self.policy.action_mean[:original_batch_size]
             sigma_batch = self.policy.action_std[:original_batch_size]
             entropy_batch = self.policy.entropy[:original_batch_size]
 
-            # KL
+            # KL 自适应KL/学习率调整
             if self.desired_kl is not None and self.schedule == "adaptive":
-                with torch.inference_mode():
+                with torch.inference_mode():   # 不产生梯度
+                    # 对角高斯KL公式
                     kl = torch.sum(
                         torch.log(sigma_batch / old_sigma_batch + 1.0e-5)
                         + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch))
@@ -270,7 +274,7 @@ class PPO:
                     )
                     kl_mean = torch.mean(kl)
 
-                    # Reduce the KL divergence across all GPUs
+                    # Reduce the KL divergence across all GPUs  多GPU同步kl
                     if self.is_multi_gpu:
                         torch.distributed.all_reduce(kl_mean, op=torch.distributed.ReduceOp.SUM)
                         kl_mean /= self.gpu_world_size
@@ -279,23 +283,24 @@ class PPO:
                     # Perform this adaptation only on the main process
                     # TODO: Is this needed? If KL-divergence is the "same" across all GPUs,
                     #       then the learning rate should be the same across all GPUs.
+                    # 根据kl调整学习率，看论文原文。仅在主gpu计算
                     if self.gpu_global_rank == 0:
                         if kl_mean > self.desired_kl * 2.0:
                             self.learning_rate = max(1e-5, self.learning_rate / 1.5)
                         elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
                             self.learning_rate = min(1e-2, self.learning_rate * 1.5)
 
-                    # Update the learning rate for all GPUs
+                    # Update the learning rate for all GPUs 将计算出的学习率广播给其它gpu
                     if self.is_multi_gpu:
                         lr_tensor = torch.tensor(self.learning_rate, device=self.device)
                         torch.distributed.broadcast(lr_tensor, src=0)
                         self.learning_rate = lr_tensor.item()
 
-                    # Update the learning rate for all parameter groups
+                    # Update the learning rate for all parameter groups 将学习率存入参数组，方便log
                     for param_group in self.optimizer.param_groups:
                         param_group["lr"] = self.learning_rate
 
-            # Surrogate loss
+            # Surrogate loss 计算clip损失，见论文公式7
             ratio = torch.exp(actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch))
             surrogate = -torch.squeeze(advantages_batch) * ratio
             surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(
@@ -303,18 +308,18 @@ class PPO:
             )
             surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
 
-            # Value function loss
+            # Value function loss 值函数损失（可剪裁）
             if self.use_clipped_value_loss:
                 value_clipped = target_values_batch + (value_batch - target_values_batch).clamp(
                     -self.clip_param, self.clip_param
-                )
+                )   # 一种剪裁值计算方式，target_values_batch收集数据时候的价值
                 value_losses = (value_batch - returns_batch).pow(2)
                 value_losses_clipped = (value_clipped - returns_batch).pow(2)
-                value_loss = torch.max(value_losses, value_losses_clipped).mean()
+                value_loss = torch.max(value_losses, value_losses_clipped).mean()  # 按照元素取max并求平均，保持算法稳健性
             else:
-                value_loss = (returns_batch - value_batch).pow(2).mean()
+                value_loss = (returns_batch - value_batch).pow(2).mean() # 不做剪裁，直接使用当前价值和收集时价值做均方差损失
 
-            loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()
+            loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean() # 主损失
 
             # Symmetry loss
             if self.symmetry:
@@ -351,11 +356,12 @@ class PPO:
 
             # Random Network Distillation loss
             # TODO: Move this processing to inside RND module.
+            # 此损失没有加入主损失，而是单独作用于RND网络做优化
             if self.rnd:
                 # extract the rnd_state
                 # TODO: Check if we still need torch no grad. It is just an affine transformation.
                 with torch.no_grad():
-                    rnd_state_batch = self.rnd.get_rnd_state(obs_batch[:original_batch_size])
+                    rnd_state_batch = self.rnd.get_rnd_state(obs_batch[:original_batch_size]) # 这里也只采用原始样本
                     rnd_state_batch = self.rnd.state_normalizer(rnd_state_batch)
                 # predict the embedding and the target
                 predicted_embedding = self.rnd.predictor(rnd_state_batch)
@@ -375,11 +381,11 @@ class PPO:
 
             # Collect gradients from all GPUs
             if self.is_multi_gpu:
-                self.reduce_parameters()
+                self.reduce_parameters()  # 将各GPU的梯度聚合，保证多GPU上参数更新一致(此处是求平均)
 
             # Apply the gradients
             # -- For PPO
-            nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+            nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm) # 梯度裁减
             self.optimizer.step()
             # -- For RND
             if self.rnd_optimizer:

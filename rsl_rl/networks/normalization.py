@@ -13,6 +13,7 @@ from torch import nn
 
 class EmpiricalNormalization(nn.Module):
     """Normalize mean and variance of values based on empirical values."""
+    """根据输入数据动态更新（学习）均值与均方差的归一化模块"""
 
     def __init__(self, shape, eps=1e-2, until=None):
         """Initialize EmpiricalNormalization module.
@@ -46,7 +47,7 @@ class EmpiricalNormalization(nn.Module):
 
         return (x - self._mean) / (self._std + self.eps)
 
-    @torch.jit.unused
+    @torch.jit.unused # 告诉jit在脚本化模型时忽略此函数，因为这些统计量只在训练阶段用到了
     def update(self, x):
         """Learn input values without computing the output values of them"""
 
@@ -84,7 +85,7 @@ class EmpiricalDiscountedVariationNormalization(nn.Module):
         super().__init__()
 
         self.emp_norm = EmpiricalNormalization(shape, eps, until)
-        self.disc_avg = _DiscountedAverage(gamma)
+        self.disc_avg = _DiscountedAverage(gamma)  # 递归计算平均回报
 
     def forward(self, rew):
         if self.training:

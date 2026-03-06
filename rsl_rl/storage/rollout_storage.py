@@ -12,7 +12,7 @@ from rsl_rl.utils import split_and_pad_trajectories
 
 
 class RolloutStorage:
-    class Transition:
+    class Transition:   # 经验池，从目标策略搜集到的轨迹包含的各个变量
         def __init__(self):
             self.observations = None
             self.actions = None
@@ -133,16 +133,16 @@ class RolloutStorage:
             else:
                 next_values = self.values[step + 1]
             # 1 if we are not in a terminal state, 0 otherwise
-            next_is_not_terminal = 1.0 - self.dones[step].float()
+            next_is_not_terminal = 1.0 - self.dones[step].float() # next_is_not_terminal=1表示不是在终止步骤
             # TD error: r_t + gamma * V(s_{t+1}) - V(s_t)
             delta = self.rewards[step] + next_is_not_terminal * gamma * next_values - self.values[step]
             # Advantage: A(s_t, a_t) = delta_t + gamma * lambda * A(s_{t+1}, a_{t+1})
             advantage = delta + next_is_not_terminal * gamma * lam * advantage
             # Return: R_t = A(s_t, a_t) + V(s_t)
-            self.returns[step] = advantage + self.values[step]
+            self.returns[step] = advantage + self.values[step] # 回报
 
         # Compute the advantages
-        self.advantages = self.returns - self.values
+        self.advantages = self.returns - self.values  # 每一步的优势值列表
         # Normalize the advantages if flag is set
         # This is to prevent double normalization (i.e. if per minibatch normalization is used)
         if normalize_advantage:

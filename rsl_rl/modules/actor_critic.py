@@ -42,22 +42,22 @@ class ActorCritic(nn.Module):
         num_actor_obs = 0
         for obs_group in obs_groups["policy"]:
             assert len(obs[obs_group].shape) == 2, "The ActorCritic module only supports 1D observations."
-            num_actor_obs += obs[obs_group].shape[-1]
+            num_actor_obs += obs[obs_group].shape[-1]   # 类加每个观测组的特征数量
         num_critic_obs = 0
         for obs_group in obs_groups["critic"]:
             assert len(obs[obs_group].shape) == 2, "The ActorCritic module only supports 1D observations."
             num_critic_obs += obs[obs_group].shape[-1]
 
-        self.state_dependent_std = state_dependent_std
+        self.state_dependent_std = state_dependent_std # 是否使用状态依赖的标准差
         # actor
-        if self.state_dependent_std:
+        if self.state_dependent_std:  # 使用则输出层输出动作和动作的标准差
             self.actor = MLP(num_actor_obs, [2, num_actions], actor_hidden_dims, activation)
         else:
             self.actor = MLP(num_actor_obs, num_actions, actor_hidden_dims, activation)
         # actor observation normalization
         self.actor_obs_normalization = actor_obs_normalization
         if actor_obs_normalization:
-            self.actor_obs_normalizer = EmpiricalNormalization(num_actor_obs)
+            self.actor_obs_normalizer = EmpiricalNormalization(num_actor_obs)   # 初始化actor网络输入观测归一化
         else:
             self.actor_obs_normalizer = torch.nn.Identity()
         print(f"Actor MLP: {self.actor}")

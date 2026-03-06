@@ -117,12 +117,12 @@ class RandomNetworkDistillation(nn.Module):
         rnd_state = self.get_rnd_state(obs)
         rnd_state = self.state_normalizer(rnd_state)
         # Obtain the embedding of the rnd state from the target and predictor networks
-        target_embedding = self.target(rnd_state).detach()
-        predictor_embedding = self.predictor(rnd_state).detach()
+        target_embedding = self.target(rnd_state).detach()  # 目标网络的嵌入
+        predictor_embedding = self.predictor(rnd_state).detach() # 预测网络的嵌入
         # Compute the intrinsic reward as the distance between the embeddings
-        intrinsic_reward = torch.linalg.norm(target_embedding - predictor_embedding, dim=1)
+        intrinsic_reward = torch.linalg.norm(target_embedding - predictor_embedding, dim=1) # 内在奖励
         # Normalize intrinsic reward
-        intrinsic_reward = self.reward_normalizer(intrinsic_reward)
+        intrinsic_reward = self.reward_normalizer(intrinsic_reward) # 归一化内在奖励
 
         # Check the weight schedule
         if self.weight_scheduler is not None:
@@ -130,7 +130,7 @@ class RandomNetworkDistillation(nn.Module):
         else:
             self.weight = self.initial_weight
         # Scale intrinsic reward
-        intrinsic_reward *= self.weight
+        intrinsic_reward *= self.weight # 内在奖励尺度化操作
 
         return intrinsic_reward
 
