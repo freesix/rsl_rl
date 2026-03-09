@@ -16,7 +16,7 @@ class RolloutStorage:
         def __init__(self):
             self.observations = None
             self.actions = None
-            self.privileged_actions = None
+            self.privileged_actions = None  # 特权动作
             self.rewards = None
             self.dones = None
             self.values = None
@@ -158,13 +158,18 @@ class RolloutStorage:
 
     # for reinforcement learning with feedforward networks
     def mini_batch_generator(self, num_mini_batches, num_epochs=8):
+        """
+        为强化学习(PPO)生成打乱的小批次训练数据
+        num_mini_batches: 每个epochs划分的小批次数量
+        num_epochs: 训练轮次（此小批量数据）
+        """
         if self.training_type != "rl":
             raise ValueError("This function is only available for reinforcement learning training.")
-        batch_size = self.num_envs * self.num_transitions_per_env
+        batch_size = self.num_envs * self.num_transitions_per_env # 环境数量 x 每个环境收集的步数
         mini_batch_size = batch_size // num_mini_batches
         indices = torch.randperm(num_mini_batches * mini_batch_size, requires_grad=False, device=self.device)
 
-        # Core
+        # Core  核心数据展平[环境数量,步数,特征维度]->[总样本数,特征维度]
         observations = self.observations.flatten(0, 1)
         actions = self.actions.flatten(0, 1)
         values = self.values.flatten(0, 1)
@@ -176,7 +181,7 @@ class RolloutStorage:
         old_mu = self.mu.flatten(0, 1)
         old_sigma = self.sigma.flatten(0, 1)
 
-        for epoch in range(num_epochs):
+        for epoch in range(num_epochs): # 多轮训练，同一批次数据训练多轮
             for i in range(num_mini_batches):
                 # Select the indices for the mini-batch
                 start = i * mini_batch_size

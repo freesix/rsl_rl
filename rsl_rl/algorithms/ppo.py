@@ -40,9 +40,9 @@ class PPO:
         device="cpu",
         normalize_advantage_per_mini_batch=False,
         # RND parameters
-        rnd_cfg: dict | None = None,
+        rnd_cfg: dict | None = None,    # 随机蒸馏网络（探索模块）配置
         # Symmetry parameters
-        symmetry_cfg: dict | None = None,
+        symmetry_cfg: dict | None = None,   # 对称模块配置（数据增强）
         # Distributed training parameters
         multi_gpu_cfg: dict | None = None,
     ):
@@ -51,8 +51,8 @@ class PPO:
         self.is_multi_gpu = multi_gpu_cfg is not None
         # Multi-GPU parameters
         if multi_gpu_cfg is not None:
-            self.gpu_global_rank = multi_gpu_cfg["global_rank"]
-            self.gpu_world_size = multi_gpu_cfg["world_size"]
+            self.gpu_global_rank = multi_gpu_cfg["global_rank"] # 多gpu节点数量
+            self.gpu_world_size = multi_gpu_cfg["world_size"]   # 节点下gpu数量
         else:
             self.gpu_global_rank = 0
             self.gpu_world_size = 1
@@ -92,11 +92,11 @@ class PPO:
             self.symmetry = None
 
         # PPO components
-        self.policy = policy
+        self.policy = policy    # 策略
         self.policy.to(self.device)
         # Create optimizer
         self.optimizer = optim.Adam(self.policy.parameters(), lr=learning_rate)
-        # Create rollout storage
+        # Create rollout storage   回放池
         self.storage: RolloutStorage = None  # type: ignore
         self.transition = RolloutStorage.Transition()
 
@@ -214,6 +214,7 @@ class PPO:
 
             # number of augmentations per sample
             # we start with 1 and increase it if we use symmetry augmentation
+            # 对称数据增强代表的索引，若使用则从1开始递增
             num_aug = 1
             # original batch size
             # we assume policy group is always there and needs augmentation
@@ -285,9 +286,9 @@ class PPO:
                     #       then the learning rate should be the same across all GPUs.
                     # 根据kl调整学习率，看论文原文。仅在主gpu计算
                     if self.gpu_global_rank == 0:
-                        if kl_mean > self.desired_kl * 2.0:
+                        if kl_mean > self.desired_kl * 2.0: # 当kl散度大于预设的两倍，限制最大学习率
                             self.learning_rate = max(1e-5, self.learning_rate / 1.5)
-                        elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
+                        elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0: # 当kl散度小于预设，限制最小学习率
                             self.learning_rate = min(1e-2, self.learning_rate * 1.5)
 
                     # Update the learning rate for all GPUs 将计算出的学习率广播给其它gpu

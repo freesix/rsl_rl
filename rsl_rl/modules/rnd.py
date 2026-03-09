@@ -27,8 +27,8 @@ class RandomNetworkDistillation(nn.Module):
         target_hidden_dims: list[int],
         activation: str = "elu",
         weight: float = 0.0,
-        state_normalization: bool = False,
-        reward_normalization: bool = False,
+        state_normalization: bool = False,  # 输入状态是否归一化
+        reward_normalization: bool = False, # 内在奖励是否归一化
         device: str = "cpu",
         weight_schedule: dict | None = None,
     ):
